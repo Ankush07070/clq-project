@@ -1,0 +1,39 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+venv/
+env/
+ENV/
+.venv/
+
+.ipynb_checkpoints/
+
+# Large/local ML assets
+artifacts/*.pth
+artifacts/*.pt
+artifacts/*.pkl
+artifacts/*.joblib
+# Keep model configuration and metrics versionable
+!artifacts/model_config.json
+!artifacts/training_history.json
+!artifacts/test_metrics.json
+
+data/raw/images/
+# Keep source metadata if desired; generated splits are reproducible
+
+logs/
+*.log
+
+node_modules/
+frontend/node_modules/
+newfrontend/node_modules/
+
+.vscode/
+.idea/
+.env
+.cache/
+.DS_Store
+Thumbs.db
