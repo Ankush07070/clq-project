@@ -62,6 +62,7 @@ Place the HAM10000 images under:
 data/raw/images/
 ```
 
+
 and metadata at:
 
 ```text
