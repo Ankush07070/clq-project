@@ -221,7 +221,7 @@ function App() {
       )}
 
       {/* Footer Credit */}
-      <div className="footer-credit">Developed by Ankush</div>
+      <div className="footer-credit">Developed by G - 11</div>
     </div>
   );
 }
