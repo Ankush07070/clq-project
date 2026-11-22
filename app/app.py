@@ -10,8 +10,9 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from PIL import Image, UnidentifiedImageError
 
-from app.image_utils import process_image
+from app.image_utils import process_image, skin_fraction
 from app.model_loader import load_model
+from app.ood_gate import OODGate
 from src.components.gradcam import GradCAM
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -43,6 +44,9 @@ try:
 except Exception as exc:
     model_error = str(exc)
     print(f"Model loading failed: {exc}")
+
+# Rejects inputs whose embeddings are far from the training distribution.
+ood_gate = OODGate(device)
 
 
 def encode_heatmap(image, cam):
@@ -98,15 +102,30 @@ def predict():
 
     try:
         with torch.no_grad():
-            logits = model(input_tensor)
+            features = model.extract_features(input_tensor)  # (1, 256)
+            logits = model.classifier(features)              # (1, 7)
             probs = torch.softmax(logits, dim=1)
             confidence, pred = torch.max(probs, dim=1)
 
         class_idx = int(pred.item())
+        conf_val = float(confidence.item())
+
+        ood = ood_gate.check(features, conf_val, skin_frac=skin_fraction(image))
+        if ood["rejected"]:
+            return jsonify({
+                "prediction": "Not a skin lesion",
+                "is_skin_lesion": False,
+                "ood": ood,
+                "message": "This image does not look like a skin-lesion photo. "
+                           "Please upload a close-up image of a skin lesion.",
+            })
+
         response = {
             "prediction": CLASSES[class_idx],
             "class_index": class_idx,
-            "confidence": float(confidence.item()),
+            "confidence": conf_val,
+            "is_skin_lesion": True,
+            "ood": ood,
             "probabilities": {
                 CLASSES[i]: float(probs[0, i].item()) for i in range(len(CLASSES))
             },

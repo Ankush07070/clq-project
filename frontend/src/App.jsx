@@ -49,7 +49,7 @@ function App() {
       if (data.heatmap) {
         setHeatmap(`data:image/jpeg;base64,${data.heatmap}`);
       }
-      setProbabilities(data.probabilities || null);
+      setProbabilities(data.is_skin_lesion === false ? null : data.probabilities || null);
     } catch (err) {
       setError(err.message || "An error occurred. Please try again.");
       console.error("Error:", err);
@@ -154,7 +154,40 @@ function App() {
       )}
 
       {/* Results Section */}
-      {result && (
+      {result && result.is_skin_lesion === false && (
+        <div className="result-section">
+          <div
+            className="result-card"
+            style={{
+              border: "2px solid rgba(249, 115, 22, 0.5)",
+              background: "rgba(249, 115, 22, 0.08)",
+            }}
+          >
+            <div className="result-card-content">
+              <span className="prediction-label">Upload Rejected</span>
+              <div className="prediction-result" style={{ color: "#f97316" }}>
+                Not a skin lesion
+              </div>
+              <p style={{ color: "#94a3b8", fontSize: "13px", lineHeight: 1.6, marginTop: "14px" }}>
+                {result.message}
+              </p>
+              {result.ood?.reason === "no_skin_tone" && (
+                <p style={{ color: "#64748b", fontSize: "12px", marginTop: "10px" }}>
+                  Skin-tone check failed: {((result.ood.skin_fraction || 0) * 100).toFixed(1)}% of
+                  pixels look like skin (minimum {(result.ood.threshold || 0) * 100}%)
+                </p>
+              )}
+              {result.ood && result.ood.score != null && (
+                <p style={{ color: "#64748b", fontSize: "12px", marginTop: "10px" }}>
+                  Out-of-distribution score {result.ood.score.toFixed(2)} vs
+                  allowed {result.ood.threshold?.toFixed(2)}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {result && result.is_skin_lesion !== false && (
         <div className="result-section">
           <div className="result-card">
             <div className="result-card-content">

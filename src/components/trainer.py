@@ -49,7 +49,7 @@ def train_one_epoch(model, loader, optimizer, device, criterion=None, scaler=Non
 
 
 @torch.no_grad()
-def validate(model, loader, device, criterion=None):
+def validate(model, loader, device, criterion=None, tta=False):
     try:
         model.eval()
         criterion = criterion or nn.CrossEntropyLoss()
@@ -60,7 +60,15 @@ def validate(model, loader, device, criterion=None):
             images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
             outputs = model(images)
             total_loss += criterion(outputs, labels).item()
-            all_preds.extend(outputs.argmax(dim=1).cpu().numpy())
+            if tta:
+                # Average softmax over original + horizontal + vertical flips.
+                probs = torch.softmax(outputs, dim=1)
+                for dims in ([3], [2], [3, 2]):
+                    probs = probs + torch.softmax(model(torch.flip(images, dims=dims)), dim=1)
+                preds = probs.argmax(dim=1)
+            else:
+                preds = outputs.argmax(dim=1)
+            all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
         return {

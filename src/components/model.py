@@ -1,6 +1,20 @@
 import torch
 import torch.nn as nn
-from torchvision.models import MobileNet_V2_Weights, mobilenet_v2
+from torchvision.models import (
+    EfficientNet_B0_Weights,
+    MobileNet_V2_Weights,
+    efficientnet_b0,
+    mobilenet_v2,
+)
+
+
+def _build_backbone(name, pretrained):
+    """Both supported backbones emit (B, 1280, 7, 7) feature maps at 224px."""
+    if name == "efficientnet_b0":
+        weights = EfficientNet_B0_Weights.DEFAULT if pretrained else None
+        return efficientnet_b0(weights=weights).features
+    weights = MobileNet_V2_Weights.DEFAULT if pretrained else None
+    return mobilenet_v2(weights=weights).features
 
 
 class TransformerBlock(nn.Module):
@@ -32,17 +46,17 @@ class TransformerBlock(nn.Module):
 class SkinCancerModel(nn.Module):
     """MobileNetV2 feature extractor + lightweight visual Transformer."""
 
-    def __init__(self, num_classes=7, pretrained=True):
+    def __init__(self, num_classes=7, pretrained=True, backbone="mobilenet_v2"):
         super().__init__()
-        weights = MobileNet_V2_Weights.DEFAULT if pretrained else None
-        base_model = mobilenet_v2(weights=weights)
-        self.cnn = base_model.features
+        self.backbone_name = backbone
+        self.cnn = _build_backbone(backbone, pretrained)
         self.reduce_dim = nn.Conv2d(1280, 256, kernel_size=1)
         self.transformer = TransformerBlock(embed_dim=256, num_heads=4)
         self.pool = nn.AdaptiveAvgPool1d(1)
         self.classifier = nn.Linear(256, num_classes)
 
-    def forward(self, x):
+    def extract_features(self, x):
+        """Pooled 256-d embedding, also used by the KNN out-of-distribution gate."""
         x = self.cnn(x)
         x = self.reduce_dim(x)
         batch, channels, height, width = x.shape
@@ -50,4 +64,7 @@ class SkinCancerModel(nn.Module):
         x = self.transformer(x)
         x = x.transpose(1, 2)
         x = self.pool(x).squeeze(-1)
-        return self.classifier(x)
+        return x
+
+    def forward(self, x):
+        return self.classifier(self.extract_features(x))

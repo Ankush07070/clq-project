@@ -31,6 +31,17 @@ class TrainingPipeline:
         self.epochs = int(os.getenv("EPOCHS", "15"))
         self.lr = float(os.getenv("LEARNING_RATE", "0.0001"))
         self.patience = int(os.getenv("EARLY_STOPPING_PATIENCE", "4"))
+        self.backbone = os.getenv("BACKBONE", "mobilenet_v2")
+        self.lr_scheduler_type = os.getenv("LR_SCHEDULER", "plateau")
+
+    def _make_scheduler(self, optimizer):
+        if self.lr_scheduler_type == "cosine":
+            return torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=max(1, self.epochs - 1)
+            )
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="max", factor=0.5, patience=2
+        )
 
     @staticmethod
     def seed_everything(seed=42):
@@ -74,7 +85,9 @@ class TrainingPipeline:
             )
 
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            model = SkinCancerModel(num_classes=len(label_map), pretrained=True).to(device)
+            model = SkinCancerModel(
+                num_classes=len(label_map), pretrained=True, backbone=self.backbone
+            ).to(device)
 
             # Freeze the first phase of the pretrained backbone for stable fine-tuning.
             for parameter in model.cnn.parameters():
@@ -83,14 +96,14 @@ class TrainingPipeline:
             optimizer = torch.optim.AdamW(
                 filter(lambda p: p.requires_grad, model.parameters()), lr=self.lr, weight_decay=1e-4
             )
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer, mode="max", factor=0.5, patience=2
-            )
+            scheduler = self._make_scheduler(optimizer)
             criterion = nn.CrossEntropyLoss()
             scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
 
             config = {
-                "architecture": "MobileNetV2 + Transformer",
+                "architecture": f"{self.backbone} + Transformer",
+                "backbone": self.backbone,
+                "lr_scheduler": self.lr_scheduler_type,
                 "num_classes": len(label_map),
                 "label_map": label_map,
                 "image_size": IMAGE_SIZE,
@@ -110,7 +123,10 @@ class TrainingPipeline:
             for epoch in range(self.epochs):
                 train_metrics = train_one_epoch(model, train_loader, optimizer, device, criterion, scaler)
                 val_metrics = validate(model, val_loader, device, criterion)
-                scheduler.step(val_metrics["macro_f1"])
+                if self.lr_scheduler_type == "cosine":
+                    scheduler.step()
+                else:
+                    scheduler.step(val_metrics["macro_f1"])
 
                 record = {
                     "epoch": epoch + 1,
@@ -147,17 +163,18 @@ class TrainingPipeline:
                 if epoch == 0:
                     for parameter in model.cnn[-3:].parameters():
                         parameter.requires_grad = True
-                    optimizer = torch.optim.AdamW(model.parameters(), lr=self.lr * 0.1, weight_decay=1e-4)
-                    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                        optimizer, mode="max", factor=0.5, patience=2
+                    optimizer = torch.optim.AdamW(
+                        model.parameters(), lr=self.lr * 0.1, weight_decay=1e-4
                     )
+                    scheduler = self._make_scheduler(optimizer)
 
             save_json(history, os.path.join(self.artifact_dir, "training_history.json"))
 
             # Load the best checkpoint before final test evaluation.
             checkpoint = torch.load(os.path.join(self.artifact_dir, "best_model.pth"), map_location=device)
             model.load_state_dict(checkpoint["model_state_dict"])
-            test_metrics = validate(model, test_loader, device, criterion)
+            # Test-time augmentation: average predictions over the 4 dihedral flips.
+            test_metrics = validate(model, test_loader, device, criterion, tta=True)
             report = classification_report(
                 test_metrics["labels"],
                 test_metrics["predictions"],

@@ -53,6 +53,41 @@ React frontend
 - Add `/health`, upload limits and clearer API errors.
 - Save model configuration with the checkpoint.
 - Use a single frontend.
+- Reject non-skin inputs with a **KNN out-of-distribution gate** (see below).
+
+## Out-of-distribution gate (KNN-OOD)
+
+A closed-set classifier always picks one of its 7 classes — even for a photo
+of a notebook. To reject such inputs, the API embeds each image with the
+trained model (256-d pooled features) and compares it against a bank of
+training-set embeddings (`artifacts/feature_bank.npz`):
+
+- `distance` = mean cosine distance to the 5 nearest training embeddings.
+- `score` = `distance + alpha * (1 - confidence)` (junk scores badly on both).
+- Thresholds calibrated on the validation split: distance = p99, score = p95
+  (`artifacts/ood_config.json`).
+
+If the score exceeds the threshold (or confidence < 0.25) the API returns
+`"prediction": "Not a skin lesion"` instead of forcing a diagnosis.
+
+Three rejection layers, calibrated on validation:
+
+1. **Skin-tone check** (physical): fraction of pixels passing an RGB
+   skin rule; real lesion photos average 0.77, junk often ~0. Floor at the
+   1st percentile of validation skin fractions — catches grey paper,
+   flat fills, handwriting photos.
+2. **Combined KNN score** (learned): `distance + 1 x (1 - confidence)` at
+   the 95th percentile — catches warm-toned junk that passes the skin
+   check (textured cardboard, noise). By design ~5% of genuine lesion
+   photos score above it and must retry.
+3. **Confidence floor** 0.25.
+
+Rebuild after retraining:
+
+```bash
+python scripts/build_feature_bank.py
+python scripts/calibrate_ood.py
+```
 
 ## Training
 

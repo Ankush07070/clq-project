@@ -1,0 +1,17 @@
+{
+  "k": 5,
+  "metric": "mean cosine distance to k nearest, L2-normalized 256-d embeddings",
+  "bank_size": 6959,
+  "threshold": 0.8453010439872742,
+  "val_p95": 0.718548595905304,
+  "val_p99": 0.8453010439872742,
+  "val_mean": 0.46944594383239746,
+  "val_max": 0.9500916600227356,
+  "confidence_floor": 0.25,
+  "alpha": 1.0,
+  "score_threshold": 1.2085597515106201,
+  "score_percentile": 95.0,
+  "val_score_mean": 0.6977806687355042,
+  "skin_fraction_floor": 0.029,
+  "val_skin_fraction_p1": 0.02948341836734694
+}
