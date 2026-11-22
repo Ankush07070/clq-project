@@ -4,8 +4,13 @@ An input embedding is compared against the bank of training embeddings;
 if its mean distance to the k nearest neighbours exceeds the calibrated
 threshold (or softmax confidence is suspiciously low) the request is
 rejected as "not a skin lesion" instead of forcing a 7-class diagnosis.
+
+The bank stores the sha256 of the checkpoint it was built from; the gate
+refuses to arm if the serving checkpoint does not match (a cross-model
+bank silently rejects every image).
 """
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,26 +23,70 @@ BANK_PATH = Path(os.getenv("FEATURE_BANK_PATH", BASE_DIR / "artifacts" / "featur
 CONFIG_PATH = Path(os.getenv("OOD_CONFIG_PATH", BASE_DIR / "artifacts" / "ood_config.json"))
 
 
+def file_sha256(path, buf_size=1 << 20):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while chunk := fh.read(buf_size):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 class OODGate:
-    def __init__(self, device):
+    def __init__(self, device, model_path=None):
         self.device = device
         self.bank = None
         self.config = {}
-        self.enabled = BANK_PATH.exists() and CONFIG_PATH.exists()
-        if not self.enabled:
-            print(f"OOD gate disabled (missing {BANK_PATH.name} or {CONFIG_PATH.name})")
-            return
-        data = np.load(BANK_PATH)
+        model_path = Path(model_path or os.getenv("MODEL_PATH", BASE_DIR / "artifacts" / "best_model.pth"))
+
+        # Fresh clones ship matched artifacts only under artifacts/v3_backup/.
+        if not BANK_PATH.exists():
+            fb = BASE_DIR / "artifacts" / "v3_backup" / BANK_PATH.name
+            if fb.exists():
+                BANK_PATH_val = fb
+            else:
+                self.enabled = False
+                print(f"OOD gate disabled (missing {BANK_PATH.name})")
+                return
+        else:
+            BANK_PATH_val = BANK_PATH
+        if not CONFIG_PATH.exists():
+            fc = BASE_DIR / "artifacts" / "v3_backup" / CONFIG_PATH.name
+            if fc.exists():
+                CONFIG_PATH_val = fc
+            else:
+                self.enabled = False
+                print(f"OOD gate disabled (missing {CONFIG_PATH.name})")
+                return
+        else:
+            CONFIG_PATH_val = CONFIG_PATH
+
+        data = np.load(BANK_PATH_val)
         self.bank = torch.from_numpy(data["features"]).to(device)
-        with open(CONFIG_PATH) as fh:
+        with open(CONFIG_PATH_val) as fh:
             self.config = json.load(fh)
+
+        # Hard guard: the bank must belong to the same checkpoint being served.
+        bank_sha = self.config.get("checkpoint_sha256") or (
+            str(data["checkpoint_sha256"]) if "checkpoint_sha256" in data else None
+        )
+        if bank_sha and model_path.exists():
+            served_sha = file_sha256(model_path)
+            if served_sha != bank_sha:
+                raise RuntimeError(
+                    "OOD gate checkpoint mismatch: the feature bank was built for a "
+                    f"different model ({bank_sha[:12]}... != served {served_sha[:12]}...). "
+                    "Re-run scripts/build_feature_bank.py and scripts/calibrate_ood.py."
+                )
+
+        self.enabled = True
         self.k = int(os.getenv("OOD_K", self.config.get("k", 5)))
         self.threshold = float(os.getenv("OOD_THRESHOLD", self.config.get("threshold", 0.6)))
         self.confidence_floor = float(
             os.getenv("CONFIDENCE_FLOOR", self.config.get("confidence_floor", 0.25))
         )
         print(f"OOD gate armed: bank={self.bank.shape[0]} vectors, "
-              f"k={self.k}, threshold={self.threshold:.4f}")
+              f"k={self.k}, threshold={self.threshold:.4f}, "
+              f"checkpoint={bank_sha[:12] if bank_sha else 'unversioned'}")
 
     @torch.no_grad()
     def distance(self, features):

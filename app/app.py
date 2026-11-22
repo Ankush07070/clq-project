@@ -17,6 +17,11 @@ from src.components.gradcam import GradCAM
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "artifacts" / "best_model.pth"))
+if not MODEL_PATH.exists():
+    # Fresh clones ship the matched checkpoint only under artifacts/v3_backup/.
+    _fallback = BASE_DIR / "artifacts" / "v3_backup" / "best_model.pth"
+    if _fallback.exists():
+        MODEL_PATH = _fallback
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "10"))
 
 CLASSES = [
@@ -46,7 +51,7 @@ except Exception as exc:
     print(f"Model loading failed: {exc}")
 
 # Rejects inputs whose embeddings are far from the training distribution.
-ood_gate = OODGate(device)
+ood_gate = OODGate(device, model_path=str(MODEL_PATH))
 
 
 def encode_heatmap(image, cam):

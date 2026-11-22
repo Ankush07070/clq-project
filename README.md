@@ -89,6 +89,34 @@ python scripts/build_feature_bank.py
 python scripts/calibrate_ood.py
 ```
 
+## Run the trained model on another machine
+
+The complete matched artifact set (checkpoint, feature bank, OOD config,
+metrics) is committed under `artifacts/v3_backup/`. A fresh clone needs no
+retraining and no dataset — the API automatically falls back to that folder
+when the root artifacts are absent:
+
+```bash
+git clone https://github.com/Ankush07070/clq-project.git
+cd clq-project
+python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+python -m pip install -r requirements.txt
+python -m app.app
+```
+
+On a machine without an NVIDIA GPU, install the plain (CPU) `torch` and
+`torchvision` wheels instead — inference works, just slower.
+
+Optional UI:
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+The feature bank stores the sha256 of the checkpoint it was built from;
+`app/ood_gate.py` refuses to arm on a mismatch, so a stale bank can never
+silently reject every image again.
+
 ## Training
 
 Place the HAM10000 images under:
@@ -118,7 +146,11 @@ EPOCHS=15
 BATCH_SIZE=32
 LEARNING_RATE=0.0001
 EARLY_STOPPING_PATIENCE=4
+BACKBONE=efficientnet_b0      # mobilenet_v2 (default) | efficientnet_b0
+LR_SCHEDULER=cosine           # plateau (default) | cosine
 ```
+
+The final test evaluation uses test-time augmentation (4-flip averaging).
 
 Training creates:
 

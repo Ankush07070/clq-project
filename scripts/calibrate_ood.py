@@ -24,12 +24,14 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.model_loader import load_model
+from app.ood_gate import file_sha256
 from src.components.transforms import get_val_transforms
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ARTIFACTS = os.path.join(ROOT, "artifacts")
 BANK_PATH = os.path.join(ARTIFACTS, "feature_bank.npz")
 CONFIG_PATH = os.path.join(ARTIFACTS, "ood_config.json")
+CHECKPOINT = os.path.join(ARTIFACTS, "best_model.pth")
 BATCH_SIZE = 64
 
 
@@ -63,9 +65,18 @@ def main():
 
     os.chdir(ROOT)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, _ = load_model(os.path.join(ARTIFACTS, "best_model.pth"), device)
+    model, _ = load_model(CHECKPOINT, device)
 
-    bank = np.load(BANK_PATH)["features"]
+    bank_npz = np.load(BANK_PATH)
+    bank = bank_npz["features"]
+    bank_sha = str(bank_npz["checkpoint_sha256"]) if "checkpoint_sha256" in bank_npz else None
+    if bank_sha:
+        served_sha = file_sha256(CHECKPOINT)
+        if served_sha != bank_sha:
+            print("ABORT: feature_bank.npz was built for a different checkpoint "
+                  f"({bank_sha[:12]}... != {served_sha[:12]}...). "
+                  "Run scripts/build_feature_bank.py first.")
+            sys.exit(1)
     bank_t = torch.from_numpy(bank).to(device)
 
     val_df = pd.read_csv(os.path.join(ROOT, "data", "processed", "val.csv"))
@@ -105,6 +116,8 @@ def main():
     config["val_score_mean"] = float(score.mean())
     config["skin_fraction_floor"] = skin_floor
     config["val_skin_fraction_p1"] = val_p1
+    if bank_sha:
+        config["checkpoint_sha256"] = bank_sha
     with open(CONFIG_PATH, "w") as fh:
         json.dump(config, fh, indent=2)
 

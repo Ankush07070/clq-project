@@ -13,6 +13,7 @@ Creates:
     artifacts/ood_config.json    k, threshold, calibration stats
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -31,6 +32,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ARTIFACTS = os.path.join(ROOT, "artifacts")
 K = 5
 BATCH_SIZE = 64
+
+
+def file_sha256(path, buf_size=1 << 20):
+    """Fingerprint the checkpoint so the gate can refuse cross-model banks."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        while chunk := fh.read(buf_size):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 @torch.no_grad()
@@ -67,7 +77,9 @@ def knn_distances(query, bank, k=K):
 def main():
     os.chdir(ROOT)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, _ = load_model(os.path.join(ARTIFACTS, "best_model.pth"), device)
+    ckpt_path = os.path.join(ARTIFACTS, "best_model.pth")
+    model, _ = load_model(ckpt_path, device)
+    ckpt_sha = file_sha256(ckpt_path)
 
     train_df = pd.read_csv(os.path.join(ROOT, "data", "processed", "train.csv"))
     val_df = pd.read_csv(os.path.join(ROOT, "data", "processed", "val.csv"))
@@ -84,11 +96,14 @@ def main():
         os.path.join(ARTIFACTS, "feature_bank.npz"),
         features=bank,
         labels=train_df["label"].values,
+        checkpoint_sha256=np.array(ckpt_sha),
     )
     config = {
         "k": K,
         "metric": "mean cosine distance to k nearest, L2-normalized 256-d embeddings",
         "bank_size": int(bank.shape[0]),
+        "checkpoint_sha256": ckpt_sha,
+        "checkpoint_backbone": getattr(model, "backbone_name", "unknown"),
         "threshold": threshold,
         "val_p95": float(p95),
         "val_p99": float(p99),

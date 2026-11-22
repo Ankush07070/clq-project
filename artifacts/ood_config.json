@@ -2,6 +2,8 @@
   "k": 5,
   "metric": "mean cosine distance to k nearest, L2-normalized 256-d embeddings",
   "bank_size": 6959,
+  "checkpoint_sha256": "823556e9251fe54a641036c8f523b7085e0490369dab428ce0a1bfdfbf3e9917",
+  "checkpoint_backbone": "efficientnet_b0",
   "threshold": 0.8792449617385868,
   "val_p95": 0.7263678431510925,
   "val_p99": 0.8792449617385868,
